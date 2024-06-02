@@ -178,8 +178,8 @@ class Solver(object):
             self.w_train_f1 = self.print_metric(ground_truth, predictions, "train")
 
 
-            self.validation_loss, self.w_valid_f1, valid_predictions = self.evaluate(self.valid_data_loader, mode="valid")
-            self.test_loss, self.w_test_f1, test_predictions = self.evaluate(self.test_data_loader, mode="test")
+            self.validation_loss, self.w_valid_f1, valid_predictions, valid_ground_truth, valid_texts = self.evaluate(self.valid_data_loader, mode="valid")
+            self.test_loss, self.w_test_f1, test_predictions, test_ground_truth, test_texts = self.evaluate(self.test_data_loader, mode="test")
 
             print(self.epoch_loss, self.w_train_f1, self.w_valid_f1, self.w_test_f1)
 
@@ -200,25 +200,19 @@ class Solver(object):
                 break
 
 
-        return best_test_loss, best_test_f1_w, best_epoch
+        return best_test_loss, best_test_f1_w, best_epoch, test_predictions, test_ground_truth, test_texts
 
 
 
     def evaluate(self, data_loader, mode=None):
-        assert(mode is not None)
+        assert mode is not None
 
         self.model.eval()
-        batch_loss_history, predictions, ground_truth = [], [], []
+        batch_loss_history, predictions, ground_truth, texts = [], [], [], []
         for batch_i, (conversations, labels, conversation_length, sentence_length, type_ids, masks) in enumerate(data_loader):
-            # conversations: (batch_size) list of conversations
-            #   conversation: list of sentences
-            #   sentence: list of tokens
-            # conversation_length: list of int
-            # sentence_length: (batch_size) list of conversation list of sentence_lengths
-
             input_conversations = conversations
 
-            # flatten input and target conversations
+            # Flatten input and target conversations
             input_sentences = [sent for conv in input_conversations for sent in conv]
             input_labels = [label for conv in labels for label in conv]
             input_sentence_length = [l for len_list in sentence_length for l in len_list]
@@ -227,7 +221,7 @@ class Solver(object):
             orig_input_labels = input_labels
 
             with torch.no_grad():
-                # transfering the input to cuda
+                # Transfer input to CUDA
                 input_sentences = to_var(torch.LongTensor(input_sentences))
                 input_labels = to_var(torch.LongTensor(input_labels))
                 input_sentence_length = to_var(torch.LongTensor(input_sentence_length))
@@ -247,16 +241,17 @@ class Solver(object):
 
             predictions += present_predictions
             ground_truth += orig_input_labels
+            texts += input_sentences.tolist()  # Assuming you want the texts as lists of tokens
 
             assert not isnan(batch_loss.item())
             batch_loss_history.append(batch_loss.item())
 
         epoch_loss = np.mean(batch_loss_history)
 
-        print_str = f'{mode} loss: {epoch_loss:.3f}\n'
+        print(f'{mode} loss: {epoch_loss:.3f}\n')
 
         w_f1_score = self.print_metric(ground_truth, predictions, mode)
-        return epoch_loss, w_f1_score, predictions
+        return epoch_loss, w_f1_score, predictions, ground_truth, texts
     
 
     

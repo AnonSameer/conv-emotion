@@ -4,11 +4,22 @@ from configs import get_config
 from util import Vocab
 import os
 import pickle
+import json
 
 
 def load_pickle(path):
     with open(path, 'rb') as f:
         return pickle.load(f)
+    
+
+def save_results(predictions, true_labels, texts, run):
+    results = {
+        'predictions': predictions,
+        'true_labels': true_labels,
+        'texts': texts
+    }
+    with open(f'test_results_run_{run}.json', 'w') as f:
+        json.dump(results, f)
 
 if __name__ == '__main__':
     config = get_config(mode='train')
@@ -62,7 +73,8 @@ if __name__ == '__main__':
 
         solver.build()
 
-        best_test_loss, best_test_f1_w, best_epoch = solver.train()
+        best_test_loss, best_test_f1_w, best_epoch, predictions, true_labels, texts = solver.train(run)
+        save_results(predictions, true_labels, texts, run)
 
         print(f"Current RUN: {run+1}")
 
