@@ -209,16 +209,12 @@ class Solver(object):
 
         self.model.eval()
         batch_loss_history, predictions, ground_truth = [], [], []
-        for batch_i, (conversations, labels, conversation_length, sentence_length, type_ids, masks) in enumerate(data_loader):
-            # conversations: (batch_size) list of conversations
-            #   conversation: list of sentences
-            #   sentence: list of tokens
-            # conversation_length: list of int
-            # sentence_length: (batch_size) list of conversation list of sentence_lengths
+        correct_predictions, incorrect_predictions = [], []
 
+        for batch_i, (conversations, labels, conversation_length, sentence_length, type_ids, masks) in enumerate(data_loader):
             input_conversations = conversations
 
-            # flatten input and target conversations
+            # Flatten input and target conversations
             input_sentences = [sent for conv in input_conversations for sent in conv]
             input_labels = [label for conv in labels for label in conv]
             input_sentence_length = [l for len_list in sentence_length for l in len_list]
@@ -227,7 +223,6 @@ class Solver(object):
             orig_input_labels = input_labels
 
             with torch.no_grad():
-                # transfering the input to cuda
                 input_sentences = to_var(torch.LongTensor(input_sentences))
                 input_labels = to_var(torch.LongTensor(input_labels))
                 input_sentence_length = to_var(torch.LongTensor(input_sentence_length))
@@ -241,7 +236,7 @@ class Solver(object):
                 input_masks)
 
             present_predictions = list(np.argmax(sentence_logits.detach().cpu().numpy(), axis=1))
-            
+
             loss_function = nn.CrossEntropyLoss()
             batch_loss = loss_function(sentence_logits, input_labels)
 
@@ -251,12 +246,30 @@ class Solver(object):
             assert not isnan(batch_loss.item())
             batch_loss_history.append(batch_loss.item())
 
-        epoch_loss = np.mean(batch_loss_history)
+            # Logging correct and incorrect predictions
+            for i in range(len(present_predictions)):
+                if present_predictions[i] == orig_input_labels[i]:
+                    correct_predictions.append((input_conversations[i], orig_input_labels[i], present_predictions[i]))
+                else:
+                    incorrect_predictions.append((input_conversations[i], orig_input_labels[i], present_predictions[i]))
 
+        epoch_loss = np.mean(batch_loss_history)
         print_str = f'{mode} loss: {epoch_loss:.3f}\n'
 
         w_f1_score = self.print_metric(ground_truth, predictions, mode)
+        
+        # Save the log to a file
+        with open(f'{mode}_predictions_log.txt', 'w') as f:
+            f.write("Correct Predictions:\n")
+            for conv, true_label, pred_label in correct_predictions:
+                f.write(f"Conversation: {conv}, True Label: {true_label}, Predicted Label: {pred_label}\n")
+            
+            f.write("\nIncorrect Predictions:\n")
+            for conv, true_label, pred_label in incorrect_predictions:
+                f.write(f"Conversation: {conv}, True Label: {true_label}, Predicted Label: {pred_label}\n")
+        
         return epoch_loss, w_f1_score, predictions
+
     
 
     
