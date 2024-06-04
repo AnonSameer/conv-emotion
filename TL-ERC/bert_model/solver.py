@@ -13,6 +13,7 @@ import math
 import pickle
 import gensim
 from sklearn.metrics import classification_report
+from pytorch_pretrained_bert import BertTokenizer
 
 
 class Solver(object):
@@ -205,11 +206,21 @@ class Solver(object):
 
 
     def evaluate(self, data_loader, mode=None):
+        
+        def clean_output(output):
+            output = re.sub(r'\[CLS\]', '', output)
+            output = re.sub(r'\[SEP\]', '', output)
+            output = re.sub(r'\[PAD\]', '', output)
+            output = re.sub(r'\s+', ' ', output)
+            return output.strip()
+        
         assert(mode is not None)
 
         self.model.eval()
         batch_loss_history, predictions, ground_truth = [], [], []
         correct_predictions, incorrect_predictions = [], []
+
+        tokenizer = BertTokenizer.from_pretrained("bert-base-uncased", do_lower_case=True)
 
         for batch_i, (conversations, labels, conversation_length, sentence_length, type_ids, masks) in enumerate(data_loader):
             input_conversations = conversations
@@ -220,7 +231,6 @@ class Solver(object):
             input_sentence_length = [l for len_list in sentence_length for l in len_list]
             input_conversation_length = [l for l in conversation_length]
             input_masks = [mask for conv in masks for mask in conv]
-            orig_input_labels = input_labels
 
             with torch.no_grad():
                 input_sentences = to_var(torch.LongTensor(input_sentences))
@@ -241,34 +251,64 @@ class Solver(object):
             batch_loss = loss_function(sentence_logits, input_labels)
 
             predictions += present_predictions
-            ground_truth += orig_input_labels
+            ground_truth += input_labels.tolist()
 
             assert not isnan(batch_loss.item())
             batch_loss_history.append(batch_loss.item())
 
             # Logging correct and incorrect predictions
-            for i in range(len(present_predictions)):
-                if present_predictions[i] == orig_input_labels[i]:
-                    correct_predictions.append((input_conversations[i], orig_input_labels[i], present_predictions[i]))
-                else:
-                    incorrect_predictions.append((input_conversations[i], orig_input_labels[i], present_predictions[i]))
+            idx = 0
+            for conv, conv_labels in zip(conversations, labels):
+                for utt, true_label in zip(conv, conv_labels):
+                    pred_label = present_predictions[idx]
+                    # Convert IDs to tokens and then join to form sentences
+                    readable_utt = tokenizer.convert_ids_to_tokens(utt)
+                    readable_utt = " ".join(readable_utt)
+
+                    # Clean the readable utterance
+                    readable_utt = clean_output(readable_utt)
+
+                    if pred_label == true_label:
+                        correct_predictions.append((readable_utt, true_label, pred_label))
+                    else:
+                        incorrect_predictions.append((readable_utt, true_label, pred_label))
+                    idx += 1
 
         epoch_loss = np.mean(batch_loss_history)
         print_str = f'{mode} loss: {epoch_loss:.3f}\n'
+        print(print_str)
 
         w_f1_score = self.print_metric(ground_truth, predictions, mode)
         
         # Save the log to a file
+        emo_classes = {'happy': 0, 'sad': 1, 'neutral': 2, 'anger': 3, 
+                'excited': 4, 'frustration': 5}
+
+        # Function to convert numeric labels to emotion names
+        def numeric_to_emotion(label):
+            for emotion, num_label in emo_classes.items():
+                if num_label == label:
+                    return emotion
+            return 'Unknown'
+
+        # Update the output printing to use emotion names instead of numeric labels
         with open(f'{mode}_predictions_log.txt', 'w') as f:
             f.write("Correct Predictions:\n")
-            for conv, true_label, pred_label in correct_predictions:
-                f.write(f"Conversation: {conv}, True Label: {true_label}, Predicted Label: {pred_label}\n")
+            for utt, true_label, pred_label in correct_predictions:
+                true_emotion = numeric_to_emotion(true_label)
+                pred_emotion = numeric_to_emotion(pred_label)
+                f.write(f"Utterance: {utt}, True Label: {true_emotion}, Predicted Label: {pred_emotion}\n")
             
             f.write("\nIncorrect Predictions:\n")
-            for conv, true_label, pred_label in incorrect_predictions:
-                f.write(f"Conversation: {conv}, True Label: {true_label}, Predicted Label: {pred_label}\n")
+            for utt, true_label, pred_label in incorrect_predictions:
+                true_emotion = numeric_to_emotion(true_label)
+                pred_emotion = numeric_to_emotion(pred_label)
+                f.write(f"Utterance: {utt}, True Label: {true_emotion}, Predicted Label: {pred_emotion}\n")
         
         return epoch_loss, w_f1_score, predictions
+
+ 
+
 
     
 
